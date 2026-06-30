@@ -1,423 +1,311 @@
 import React, { useState, useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
-import { ShoppingBag, MapPin, Send, Compass, Info, Navigation } from 'lucide-react';
+import { ShoppingBag, MapPin, Send, Package, Clock, CheckCircle, Bike } from 'lucide-react';
 
-const createDivIcon = (html, className = '') => {
-  return L.divIcon({
-    html: html,
-    className: `custom-div-icon ${className}`,
-    iconSize: [28, 28],
-    iconAnchor: [14, 14],
-    popupAnchor: [0, -14]
-  });
+const createDivIcon = (html) => L.divIcon({
+  html, className: 'custom-div-icon', iconSize: [28, 28], iconAnchor: [14, 14],
+});
+
+const pickupIconHTML = `<div style="background:#4f8ef7;border:3px solid #fff;width:22px;height:22px;border-radius:50%;box-shadow:0 0 10px rgba(79,142,247,0.6)"></div>`;
+const deliveryIconHTML = `<div style="background:#ef4444;border:3px solid #fff;width:22px;height:22px;border-radius:50%;box-shadow:0 0 10px rgba(239,68,68,0.6)"></div>`;
+
+const HARDCODED_MENU = [
+  { id: '1', name: 'Margherita Pizza', price: 249, emoji: '🍕' },
+  { id: '2', name: 'Double Cheese Burger', price: 189, emoji: '🍔' },
+  { id: '3', name: 'Chicken Wrap Combo', price: 159, emoji: '🌯' },
+  { id: '4', name: 'Mango Smoothie', price: 99, emoji: '🥭' },
+  { id: '5', name: 'Loaded Fries', price: 89, emoji: '🍟' },
+  { id: '6', name: 'Cold Coffee', price: 79, emoji: '☕' },
+];
+
+const MapClickHandler = ({ onMapClick }) => {
+  useMapEvents({ click(e) { onMapClick(e.latlng.lng, e.latlng.lat); } });
+  return null;
 };
 
-const pickupIconHTML = `
-  <div style="background-color: #3b82f6; border: 3.5px solid #ffffff; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 8px rgba(59, 130, 246, 0.6);"></div>
-`;
-
-const deliveryIconHTML = `
-  <div style="background-color: #ef4444; border: 3.5px solid #ffffff; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 8px rgba(239, 68, 68, 0.6);"></div>
-`;
-
-// Merchant Station coordinates
-const MERCHANTS = [
-  { id: '1', name: 'Downtown Pizza Station', lng: 77.5946, lat: 12.9716 },
-  { id: '2', name: 'West End Burger Grill', lng: 77.5750, lat: 12.9800 },
-  { id: '3', name: 'East Side Smoothie Bar', lng: 77.6200, lat: 12.9600 },
-];
-
-const ITEMS = [
-  { id: '1', name: 'Pepperoni Feast Pizza', price: 299 },
-  { id: '2', name: 'Double Cheese Beef Burger', price: 180 },
-  { id: '3', name: 'Spicy Chicken Wrap Combo', price: 150 },
-  { id: '4', name: 'Organic Mango Smoothie', price: 90 },
-];
-
-// Click listener to set delivery coordinates on the map
-const MapClickHandler = ({ onMapClick }) => {
-  useMapEvents({
-    click(e) {
-      onMapClick(e.latlng.lng, e.latlng.lat);
-    },
-  });
+const statusIcon = (s) => {
+  if (s === 'pending') return <Clock size={12} />;
+  if (s === 'assigned') return <Bike size={12} />;
+  if (s === 'picked_up') return <Package size={12} />;
+  if (s === 'delivered') return <CheckCircle size={12} />;
   return null;
 };
 
 const CustomerDashboard = ({ token, socket, onTrackOrder }) => {
   const [orders, setOrders] = useState([]);
-  const [selectedMerchantId, setSelectedMerchantId] = useState('1');
-  const [selectedItems, setSelectedItems] = useState({}); // { itemId: quantity }
+  const [merchants, setMerchants] = useState([]);
+  const [selectedMerchant, setSelectedMerchant] = useState(null);
+  const [selectedItems, setSelectedItems] = useState({});
   const [deliveryAddress, setDeliveryAddress] = useState('');
-  
-  const [deliveryLng, setDeliveryLng] = useState(77.6050); // Initial delivery coordinates
+  const [deliveryLng, setDeliveryLng] = useState(77.6050);
   const [deliveryLat, setDeliveryLat] = useState(12.9780);
-
   const [loading, setLoading] = useState(false);
+  const [loadingMerchants, setLoadingMerchants] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  // Find currently selected merchant coordinates
-  const selectedMerchant = MERCHANTS.find(m => m.id === selectedMerchantId) || MERCHANTS[0];
-
-  const fetchCustomerOrders = async () => {
+  const fetchMerchants = async () => {
     try {
-      const res = await fetch('/api/orders', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      setLoadingMerchants(true);
+      const res = await fetch('/api/auth/merchants');
       const data = await res.json();
-      if (res.ok) {
-        setOrders(data);
+      if (res.ok && data.length > 0) {
+        setMerchants(data);
+        setSelectedMerchant(data[0]);
       }
     } catch (err) {
-      console.error('Error fetching customer orders:', err);
+      console.error('Could not fetch merchants:', err);
+    } finally {
+      setLoadingMerchants(false);
     }
+  };
+
+  const fetchOrders = async () => {
+    try {
+      const res = await fetch('/api/orders', { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (res.ok) setOrders(data);
+    } catch (err) { console.error(err); }
   };
 
   useEffect(() => {
-    fetchCustomerOrders();
-
+    fetchMerchants();
+    fetchOrders();
     if (socket) {
-      // Listen for updates on the customer's orders
-      socket.on('order_updated', () => {
-        fetchCustomerOrders();
-      });
+      socket.on('order_updated', fetchOrders);
+      socket.on('order_created', fetchOrders);
     }
-
-    return () => {
-      if (socket) socket.off('order_updated');
-    };
+    return () => { if (socket) { socket.off('order_updated'); socket.off('order_created'); } };
   }, [socket, token]);
 
-  const handleItemQuantityChange = (itemId, change) => {
+  const changeQty = (id, delta) => {
     setSelectedItems(prev => {
-      const qty = (prev[itemId] || 0) + change;
-      if (qty <= 0) {
-        const copy = { ...prev };
-        delete copy[itemId];
-        return copy;
-      }
-      return { ...prev, [itemId]: qty };
+      const q = (prev[id] || 0) + delta;
+      if (q <= 0) { const c = { ...prev }; delete c[id]; return c; }
+      return { ...prev, [id]: q };
     });
   };
 
-  // Distance calculation
-  const getDistance = (lon1, lat1, lon2, lat2) => {
-    const R = 6371; // km
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-              Math.sin(dLon/2) * Math.sin(dLon/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    return R * c;
+  const getDistance = (lo1, la1, lo2, la2) => {
+    const R = 6371, dL = (la2 - la1) * Math.PI / 180, dO = (lo2 - lo1) * Math.PI / 180;
+    const a = Math.sin(dL / 2) ** 2 + Math.cos(la1 * Math.PI / 180) * Math.cos(la2 * Math.PI / 180) * Math.sin(dO / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   };
 
-  const distanceKm = getDistance(selectedMerchant.lng, selectedMerchant.lat, deliveryLng, deliveryLat);
-  const deliveryFare = Math.max(50, Math.round(50 + distanceKm * 15)); // Rs. 50 base + Rs. 15 per km
+  const pickupLng = selectedMerchant?.location?.coordinates?.[0] ?? 77.5946;
+  const pickupLat = selectedMerchant?.location?.coordinates?.[1] ?? 12.9716;
+  const distKm = getDistance(pickupLng, pickupLat, deliveryLng, deliveryLat);
+  const deliveryFare = Math.max(50, Math.round(50 + distKm * 15));
+  const subtotal = Object.entries(selectedItems).reduce((s, [id, q]) => s + (HARDCODED_MENU.find(i => i.id === id)?.price ?? 0) * q, 0);
+  const total = subtotal > 0 ? subtotal + deliveryFare : 0;
 
-  const getSubtotal = () => {
-    return Object.entries(selectedItems).reduce((sum, [itemId, qty]) => {
-      const item = ITEMS.find(i => i.id === itemId);
-      return sum + (item ? item.price * qty : 0);
-    }, 0);
-  };
-
-  const handlePlaceOrder = async (e) => {
+  const handleOrder = async (e) => {
     e.preventDefault();
-    setError('');
-    setSuccess('');
-
-    // Prepare item strings
-    const orderItems = Object.entries(selectedItems).map(([itemId, qty]) => {
-      const item = ITEMS.find(i => i.id === itemId);
-      return item ? `${item.name} x${qty}` : '';
-    }).filter(i => i.length > 0);
-
-    if (orderItems.length === 0) {
-      setError('Please select at least one item to purchase.');
-      return;
-    }
-
-    if (!deliveryAddress.trim()) {
-      setError('Please enter a delivery destination address.');
-      return;
-    }
-
+    setError(''); setSuccess('');
+    const items = Object.entries(selectedItems).map(([id, q]) => {
+      const it = HARDCODED_MENU.find(i => i.id === id);
+      return it ? `${it.emoji} ${it.name} x${q}` : '';
+    }).filter(Boolean);
+    if (!items.length) { setError('Please add at least one item.'); return; }
+    if (!deliveryAddress.trim()) { setError('Please enter your delivery address.'); return; }
+    if (!selectedMerchant) { setError('Please select a store.'); return; }
     setLoading(true);
-
-    const payload = {
-      customerName: 'Customer User', // Overridden by controller
-      deliveryAddress,
-      pickupLocation: {
-        type: 'Point',
-        coordinates: [selectedMerchant.lng, selectedMerchant.lat],
-      },
-      deliveryLocation: {
-        type: 'Point',
-        coordinates: [deliveryLng, deliveryLat],
-      },
-      items: orderItems,
-    };
-
     try {
       const res = await fetch('/api/orders', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(payload),
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          deliveryAddress,
+          pickupLocation: { type: 'Point', coordinates: [pickupLng, pickupLat] },
+          deliveryLocation: { type: 'Point', coordinates: [deliveryLng, deliveryLat] },
+          items,
+          merchantId: selectedMerchant._id,
+        }),
       });
-
       const data = await res.json();
-
       if (!res.ok) throw new Error(data.message || 'Failed to place order');
-
-      setSuccess(
-        data.status === 'assigned'
-          ? `Order placed successfully! Agent ${data.assignedAgent.name} is arriving for pickup.`
-          : 'Order placed! Looking for nearby couriers.'
-      );
-
-      // Reset fields
+      setSuccess('Order placed! Your merchant will assign a delivery agent shortly.');
       setSelectedItems({});
       setDeliveryAddress('');
-      fetchCustomerOrders();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
+      fetchOrders();
+    } catch (err) { setError(err.message); }
+    finally { setLoading(false); }
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      
-      {/* Col 1: Order Placement Cockpit */}
-      <div className="flex flex-col gap-6 lg:col-span-1">
-        
-        <div className="glass-panel p-6">
-          <div className="flex items-center gap-2 mb-4">
-            <ShoppingBag size={20} className="text-blue-500" />
-            <h3 className="text-lg font-bold text-white">Order Food & Grocery</h3>
-          </div>
+    <div className="page-container fade-in">
+      <div className="two-col">
 
-          {error && (
-            <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-2.5 rounded-lg text-xs mb-4">
-              {error}
+        {/* ── LEFT: Order Panel ─────────────────────────────── */}
+        <div className="stack">
+
+          {/* Store Selector */}
+          <div className="card">
+            <div className="card-header">
+              <span className="card-title"><ShoppingBag size={16} style={{ color: 'var(--primary)' }} /> Order from a Store</span>
             </div>
-          )}
+            <div className="card-body stack">
 
-          {success && (
-            <div className="bg-green-500/10 border border-green-500/20 text-green-400 p-2.5 rounded-lg text-xs mb-4">
-              {success}
-            </div>
-          )}
+              {error && <div className="alert alert-error">{error}</div>}
+              {success && <div className="alert alert-success">{success}</div>}
 
-          <form onSubmit={handlePlaceOrder} className="flex flex-col gap-4">
-            
-            {/* Merchant Select */}
-            <div className="flex flex-col gap-1">
-              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Select Merchant Hub</label>
-              <select
-                value={selectedMerchantId}
-                onChange={(e) => setSelectedMerchantId(e.target.value)}
-                className="glass-select text-sm w-full"
-              >
-                {MERCHANTS.map(m => (
-                  <option key={m.id} value={m.id}>{m.name}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Menu List */}
-            <div className="bg-slate-950/45 p-3 rounded-xl border border-white/5 flex flex-col gap-2">
-              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-1">Station Menu</span>
-              
-              <div className="flex flex-col gap-2">
-                {ITEMS.map(item => (
-                  <div key={item.id} className="flex items-center justify-between py-1.5 border-b border-white/5 last:border-b-0">
-                    <div>
-                      <h4 className="text-xs font-semibold text-gray-200">{item.name}</h4>
-                      <p className="text-[10px] text-blue-400">Rs. {item.price}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleItemQuantityChange(item.id, -1)}
-                        className="h-6 w-6 rounded-md bg-white/5 hover:bg-white/10 text-gray-300 font-bold text-xs flex items-center justify-center border border-white/5"
+              {/* Merchants */}
+              <div>
+                <p className="section-heading">🏪 Available Stores</p>
+                {loadingMerchants ? (
+                  <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', padding: '0.5rem 0' }}>Loading stores...</div>
+                ) : merchants.length === 0 ? (
+                  <div className="alert alert-info">No merchants registered yet. Ask a merchant to sign up!</div>
+                ) : (
+                  <div className="stack" style={{ gap: '8px' }}>
+                    {merchants.map(m => (
+                      <div
+                        key={m._id}
+                        className={`store-card ${selectedMerchant?._id === m._id ? 'selected' : ''}`}
+                        onClick={() => setSelectedMerchant(m)}
                       >
-                        -
-                      </button>
-                      <span className="text-xs font-bold text-gray-300 w-4 text-center">{selectedItems[item.id] || 0}</span>
-                      <button
-                        type="button"
-                        onClick={() => handleItemQuantityChange(item.id, 1)}
-                        className="h-6 w-6 rounded-md bg-white/5 hover:bg-white/10 text-gray-300 font-bold text-xs flex items-center justify-center border border-white/5"
-                      >
-                        +
-                      </button>
-                    </div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <div>
+                            <div style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-primary)' }}>🏪 {m.name}</div>
+                            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>{m.email}</div>
+                          </div>
+                          <span className={`status-pill ${m.status === 'online' ? 'online' : 'offline'}`}>
+                            {m.status === 'online' ? 'Open' : 'Closed'}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                )}
               </div>
-            </div>
 
-            {/* Delivery address */}
-            <div className="flex flex-col gap-1">
-              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Delivery Street Address</label>
-              <input
-                type="text"
-                required
-                placeholder="Apt, Block, Road Name"
-                value={deliveryAddress}
-                onChange={(e) => setDeliveryAddress(e.target.value)}
-                className="glass-input text-sm py-2 px-3"
-              />
-            </div>
+              {/* Menu */}
+              {selectedMerchant && (
+                <div>
+                  <p className="section-heading">🍽️ Menu — {selectedMerchant.name}</p>
+                  <div style={{ background: 'rgba(255,255,255,0.02)', borderRadius: 10, border: '1px solid var(--border)', padding: '0 0.75rem' }}>
+                    {HARDCODED_MENU.map(item => (
+                      <div key={item.id} className="menu-item">
+                        <div>
+                          <div style={{ fontSize: '0.85rem', fontWeight: 500, color: 'var(--text-primary)' }}>{item.emoji} {item.name}</div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--primary)', marginTop: 2 }}>Rs. {item.price}</div>
+                        </div>
+                        <div className="qty-control">
+                          <button className="qty-btn" onClick={() => changeQty(item.id, -1)}>−</button>
+                          <span className="qty-count">{selectedItems[item.id] || 0}</span>
+                          <button className="qty-btn" onClick={() => changeQty(item.id, 1)}>+</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
-            {/* Selected Coordinates notification */}
-            <div className="p-3 bg-slate-950/60 rounded-xl border border-white/5 text-xs text-gray-400 flex flex-col gap-1.5">
-              <div className="flex items-center justify-between">
-                <span className="text-[9px] text-gray-500 font-bold uppercase">Delivery Coordinates</span>
-                <span className="text-[9px] text-blue-400 font-semibold animate-pulse">Click Map to Change</span>
+              {/* Delivery address */}
+              <div>
+                <label className="form-label">📍 Delivery Address</label>
+                <input
+                  type="text"
+                  placeholder="Your flat, block, road name..."
+                  value={deliveryAddress}
+                  onChange={e => setDeliveryAddress(e.target.value)}
+                  className="glass-input"
+                />
+                <div style={{ marginTop: 6, fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                  Also click the map on the right to pin your exact location
+                </div>
               </div>
-              <p className="font-mono text-[11px] text-gray-300">
-                Lng: {deliveryLng.toFixed(4)} | Lat: {deliveryLat.toFixed(4)}
-              </p>
-              <div className="border-t border-white/5 mt-1 pt-1.5 flex justify-between text-xs text-gray-300">
-                <span>Distance:</span>
-                <span className="font-semibold text-white">{distanceKm.toFixed(2)} km</span>
-              </div>
-            </div>
 
-            {/* Price Calculations */}
-            <div className="border-t border-white/5 pt-3 flex flex-col gap-1.5 text-xs">
-              <div className="flex justify-between text-gray-400">
-                <span>Cart Subtotal:</span>
-                <span>Rs. {getSubtotal()}</span>
-              </div>
-              <div className="flex justify-between text-gray-400">
-                <span>Geospatial Delivery:</span>
-                <span>Rs. {deliveryFare}</span>
-              </div>
-              <div className="flex justify-between text-sm font-bold text-white border-t border-white/5 pt-1.5">
-                <span>Total Amount:</span>
-                <span className="text-blue-400">Rs. {getSubtotal() + (getSubtotal() > 0 ? deliveryFare : 0)}</span>
-              </div>
-            </div>
+              {/* Fare summary */}
+              {subtotal > 0 && (
+                <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)', borderRadius: 10, padding: '0.875rem 1rem' }}>
+                  <div className="fare-row"><span>Cart Subtotal</span><span>Rs. {subtotal}</span></div>
+                  <div className="fare-row"><span>Delivery ({distKm.toFixed(1)} km)</span><span>Rs. {deliveryFare}</span></div>
+                  <div className="fare-row total"><span>Total</span><span>Rs. {total}</span></div>
+                </div>
+              )}
 
-            <button
-              type="submit"
-              disabled={loading || getSubtotal() === 0}
-              className="btn-primary w-full py-2.5 rounded-xl text-sm"
-            >
-              <Send size={14} />
-              <span>{loading ? 'Processing...' : 'Place Order'}</span>
-            </button>
-          </form>
+              <button
+                onClick={handleOrder}
+                disabled={loading || subtotal === 0 || !selectedMerchant}
+                className="btn btn-primary btn-full btn-lg"
+              >
+                <Send size={15} />
+                {loading ? 'Placing Order...' : 'Place Order'}
+              </button>
+
+            </div>
+          </div>
         </div>
 
-      </div>
+        {/* ── RIGHT: Map + Orders ───────────────────────────── */}
+        <div className="stack">
 
-      {/* Col 2 & 3: Map Selector & Orders feed */}
-      <div className="flex flex-col gap-6 lg:col-span-2">
-        
-        {/* Map panel */}
-        <div className="glass-panel p-4 min-h-[300px] flex flex-col relative">
-          <div className="absolute top-6 left-6 z-10 bg-slate-900/90 border border-white/10 px-3 py-1.5 rounded-lg text-xs font-bold pointer-events-none flex items-center gap-1.5">
-            <MapPin size={12} className="text-red-500" />
-            Set Delivery Location on Map
+          {/* Map */}
+          <div className="card">
+            <div className="card-header">
+              <span className="card-title"><MapPin size={16} style={{ color: 'var(--accent-red)' }} /> Set Delivery Location</span>
+              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Click map to drop delivery pin</span>
+            </div>
+            <div style={{ borderRadius: '0 0 16px 16px', overflow: 'hidden' }}>
+              <MapContainer center={[pickupLat, pickupLng]} zoom={13} style={{ height: 320, width: '100%' }}>
+                <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                <MapClickHandler onMapClick={(lng, lat) => { setDeliveryLng(lng); setDeliveryLat(lat); }} />
+                <Marker position={[pickupLat, pickupLng]} icon={createDivIcon(pickupIconHTML)} />
+                <Marker position={[deliveryLat, deliveryLng]} icon={createDivIcon(deliveryIconHTML)} />
+              </MapContainer>
+            </div>
+            <div style={{ padding: '0.75rem 1rem', display: 'flex', gap: '1.5rem', fontSize: '0.72rem', color: 'var(--text-muted)', borderTop: '1px solid var(--border)' }}>
+              <span><span style={{ color: '#4f8ef7' }}>●</span> Pickup (store)</span>
+              <span><span style={{ color: '#ef4444' }}>●</span> Your delivery pin</span>
+              <span style={{ marginLeft: 'auto' }}>Distance: <strong style={{ color: 'var(--text-primary)' }}>{distKm.toFixed(2)} km</strong></span>
+            </div>
           </div>
 
-          <MapContainer
-            center={[12.9716, 77.5946]}
-            zoom={13}
-            style={{ width: '100%', height: '350px' }}
-          >
-            <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
-            
-            <MapClickHandler onMapClick={(lng, lat) => {
-              setDeliveryLng(lng);
-              setDeliveryLat(lat);
-            }} />
-
-            {/* Selected Merchant Point */}
-            <Marker
-              position={[selectedMerchant.lat, selectedMerchant.lng]}
-              icon={createDivIcon(pickupIconHTML)}
-            />
-
-            {/* Selected Delivery Destination */}
-            <Marker
-              position={[deliveryLat, deliveryLng]}
-              icon={createDivIcon(deliveryIconHTML)}
-            />
-
-          </MapContainer>
-        </div>
-
-        {/* Order History */}
-        <div className="glass-panel p-6 flex-1 overflow-y-auto max-h-[320px]">
-          <div className="flex items-center gap-2 mb-4">
-            <Navigation size={18} className="text-blue-500" />
-            <h3 className="text-md font-bold text-white">Your Orders</h3>
-          </div>
-
-          <div className="flex flex-col gap-3">
-            {orders.length === 0 ? (
-              <div className="text-center py-6 text-gray-500 text-xs">You haven't placed any orders yet.</div>
-            ) : (
-              orders.map((order) => (
-                <div key={order._id} className="glass-card flex flex-col md:flex-row md:items-center justify-between gap-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h4 className="text-xs text-gray-400 font-mono text-blue-400">ID: {order._id.substring(0, 8)}...</h4>
-                      <span className={`text-[9px] px-2 py-0.5 rounded font-bold uppercase ${
-                        order.status === 'delivered' ? 'bg-green-500/20 text-green-400' :
-                        order.status === 'pending' ? 'bg-blue-500/20 text-blue-400' :
-                        order.status === 'assigned' ? 'bg-violet-500/20 text-violet-400' :
-                        order.status === 'picked_up' ? 'bg-pink-500/20 text-pink-400' : 'bg-red-500/20 text-red-400'
-                      }`}>
-                        {order.status}
+          {/* Orders */}
+          <div className="card">
+            <div className="card-header">
+              <span className="card-title">📦 Your Orders</span>
+              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{orders.length} total</span>
+            </div>
+            <div className="card-body stack" style={{ maxHeight: 340, overflowY: 'auto' }}>
+              {orders.length === 0 ? (
+                <div className="empty-state">No orders yet. Place your first order above!</div>
+              ) : orders.map(order => (
+                <div key={order._id} className="order-row">
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                      <span className={`order-status ${order.status}`}>
+                        {statusIcon(order.status)} {order.status.replace('_', ' ')}
                       </span>
+                      {order.merchant && (
+                        <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>from {order.merchant.name}</span>
+                      )}
                     </div>
-                    <p className="text-xs text-gray-200 font-semibold mt-1">
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-primary)', fontWeight: 500, marginBottom: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {order.items.join(', ')}
-                    </p>
-                    <p className="text-[10px] text-gray-500">
-                      Destination: {order.deliveryAddress}
-                    </p>
+                    </div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{order.deliveryAddress}</div>
                     {order.assignedAgent && (
-                      <div className="text-[10px] text-indigo-400 mt-1 flex items-center gap-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse"></span>
-                        Courier: <strong>{order.assignedAgent.name}</strong>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--accent-green)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <Bike size={11} /> Rider: <strong>{order.assignedAgent.name}</strong>
                       </div>
                     )}
                   </div>
-
-                  <div className="flex items-center md:flex-col justify-between md:items-end gap-2 border-t md:border-t-0 border-white/5 pt-2 md:pt-0">
-                    <span className="text-sm font-bold text-white">Rs. {order.fare}</span>
-                    <button
-                      onClick={() => onTrackOrder(order._id)}
-                      className="text-[10px] bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/15 py-1 px-3.5 rounded-lg font-bold uppercase tracking-wider transition-all focus:outline-none"
-                    >
-                      Track Live
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8, flexShrink: 0 }}>
+                    <span style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-primary)' }}>Rs. {order.fare}</span>
+                    <button onClick={() => onTrackOrder(order._id)} className="btn btn-ghost btn-sm">
+                      Track Live →
                     </button>
                   </div>
                 </div>
-              ))
-            )}
+              ))}
+            </div>
           </div>
+
         </div>
-
       </div>
-
     </div>
   );
 };

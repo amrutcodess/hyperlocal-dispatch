@@ -128,7 +128,7 @@ const App = () => {
         onToggleStatus={handleToggleStatus}
       />
       
-      <main className="container mx-auto px-4 pb-12 flex-grow">
+      <main style={{ flex: 1 }}>
         {trackingOrderId ? (
           <div className="flex flex-col gap-6">
             <div className="flex items-center justify-between">

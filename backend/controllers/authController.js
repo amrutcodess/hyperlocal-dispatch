@@ -107,3 +107,26 @@ exports.login = async (req, res, next) => {
     next(error);
   }
 };
+
+// @desc    Get all registered merchants (admin users) as store listings
+// @route   GET /api/auth/merchants
+// @access  Public
+exports.getMerchants = async (req, res, next) => {
+  try {
+    const merchants = await User.find({ role: 'admin' })
+      .select('_id name email location status')
+      .lean();
+
+    const stores = merchants.map((m) => ({
+      _id: m._id,
+      name: m.name,
+      email: m.email,
+      location: m.location,
+      status: m.status,
+    }));
+
+    res.json(stores);
+  } catch (error) {
+    next(error);
+  }
+};
